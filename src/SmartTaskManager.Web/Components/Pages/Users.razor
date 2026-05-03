@@ -1,0 +1,345 @@
+@page "/users"
+@using SmartTaskManager.Web.Configuration
+@implements IDisposable
+@inject UsersApiClient UsersApiClient
+@inject UserSession UserSession
+
+<PageTitle>Users</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Users"
+        Title="Workspace users"
+        Description="Create a local user profile or review existing task owners stored by SmartTaskManager.Api.">
+        <Actions>
+            <button class="button button--ghost" type="button" @onclick="LoadUsersAsync" disabled="@_isLoading">
+                Refresh users
+            </button>
+        </Actions>
+    </PageHeader>
+
+    @if (_errorMessage is not null)
+    {
+        <FeedbackCallout
+            Tone="danger"
+            Title="Users unavailable"
+            Message="@_errorMessage" />
+    }
+
+    @if (_statusMessage is not null)
+    {
+        <FeedbackCallout
+            Tone="success"
+            Title="Workspace updated"
+            Message="@_statusMessage" />
+    }
+
+    <div class="grid grid--2">
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <p class="panel__eyebrow">Existing profiles</p>
+                    <h2 class="panel__title">Choose the active user</h2>
+                    <p class="panel__meta">@BuildUserSummary()</p>
+                </div>
+            </div>
+
+            @if (_isLoading)
+            {
+                <LoadingState
+                    Title="Loading users"
+                    Description="Fetching local profiles from SmartTaskManager.Api." />
+            }
+            else if (_users.Count == 0)
+            {
+                <EmptyState
+                    Eyebrow="No profiles"
+                    Title="No users were returned"
+                    Description="Create a user to populate the local development data set." />
+            }
+            else
+            {
+                <div class="stack">
+                    @foreach (UserSummary user in _users)
+                    {
+                        bool isActive = IsActiveUser(user);
+
+                        <article class="user-card @(isActive ? "user-card--active" : string.Empty)">
+                            <div>
+                                <div class="task-card__title-row">
+                                    <h3>@user.UserName</h3>
+                                    @if (isActive)
+                                    {
+                                        <StatusBadge Text="Active" Tone="accent" />
+                                    }
+                                </div>
+                                <p>Created @user.CreatedOnUtc.ToLocalTime().ToString("dd MMM yyyy")</p>
+                                <p>User ID @FormatUserIdentifier(user.Id)</p>
+                            </div>
+
+                            <div class="task-card__actions">
+                                <button
+                                    class="button @(isActive ? "button--ghost" : "button--secondary") button--small"
+                                    type="button"
+                                    @onclick="@(() => SelectUser(user))"
+                                    disabled="@(_busyUserId == user.Id)">
+                                    @(isActive ? "Selected user" : "Use this user")
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="panel">
+             <AuthorizeView Policy="@AuthorizationPolicies.RequireAdminRole" Context="adminAuth">
+                <Authorized>
+                    <div class="panel__header">
+                        <div>
+                            <p class="panel__eyebrow">New profile</p>
+                            <h2 class="panel__title">Create a user</h2>
+                        </div>
+                    </div>
+
+                    <EditForm EditContext="_editContext" FormName="create-user" OnValidSubmit="HandleCreateUserAsync" OnInvalidSubmit="HandleInvalidSubmit" class="field-grid">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary class="validation-summary" />
+
+                        <div class="field">
+                            <label class="field__label" for="userName">User name</label>
+                            <InputText id="userName" class="field__input" @bind-Value="_form.UserName" maxlength="100" />
+                            <p class="field__help">Create a simple profile that can own tasks in the development data set.</p>
+                            <ValidationMessage For="@(() => _form.UserName)" />
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="button" type="submit" disabled="@_isSubmitting">
+                                Create and activate
+                            </button>
+                        </div>
+                    </EditForm>
+                </Authorized>
+                <NotAuthorized>
+                    <div class="panel__header">
+                        <div>
+                            <p class="panel__eyebrow">Management</p>
+                            <h2 class="panel__title">Local provisioning</h2>
+                        </div>
+                    </div>
+                    <EmptyState
+                        Title="Admin only"
+                        Description="Only workspace administrators can provision new local user profiles for development testing." />
+                </NotAuthorized>
+            </AuthorizeView>
+
+            @if (UserSession.HasActiveUser && UserSession.CurrentUser is not null)
+            {
+                <div class="session-card">
+                    <StatusBadge Text="Selection active" Tone="success" />
+                    <h3>Current workspace selection</h3>
+                    <p>@UserSession.CurrentUser.UserName is selected in this Blazor circuit for task routes and filters.</p>
+                    <div class="task-card__actions">
+                        <button class="button button--ghost button--small" type="button" @onclick="ClearSession">
+                            Clear session
+                        </button>
+                    </div>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private readonly CreateUserFormModel _form = new();
+    private EditContext _editContext = default!;
+    private ValidationMessageStore _validationMessageStore = default!;
+    private bool _isLoading = true;
+    private bool _isSubmitting;
+    private Guid? _busyUserId;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private IReadOnlyCollection<UserSummary> _users = Array.Empty<UserSummary>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserSession.Changed += HandleSessionChanged;
+        ConfigureEditContext();
+        await LoadUsersAsync();
+    }
+
+    public void Dispose()
+    {
+        UserSession.Changed -= HandleSessionChanged;
+        _editContext.OnFieldChanged -= HandleFieldChanged;
+        _editContext.OnValidationRequested -= HandleValidationRequested;
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            _users = (await UsersApiClient.ListUsersAsync())
+                .OrderBy(user => user.UserName)
+                .ThenBy(user => user.CreatedOnUtc)
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandleCreateUserAsync()
+    {
+        ClearServerValidationMessages();
+        _isSubmitting = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            UserSummary createdUser = await UsersApiClient.CreateUserAsync(
+                new CreateUserRequest(_form.UserName.Trim()));
+
+            _users = _users
+                .Append(createdUser)
+                .OrderBy(user => user.UserName)
+                .ToList();
+
+            _form.UserName = string.Empty;
+
+            SelectUser(createdUser, $"Created {createdUser.UserName} and selected that workspace profile.");
+        }
+        catch (SmartTaskManagerApiException apiException)
+        {
+            ApplyApiValidationErrors(apiException);
+            _errorMessage = BuildErrorMessage(apiException);
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void HandleInvalidSubmit(EditContext editContext)
+    {
+        _errorMessage = "Correct the highlighted fields and try again.";
+    }
+
+    private void SelectUser(UserSummary user, string? successMessage = null)
+    {
+        _busyUserId = user.Id;
+        _errorMessage = null;
+        UserSession.Start(user);
+        _statusMessage = successMessage ?? $"{user.UserName} is now the selected workspace user.";
+        _busyUserId = null;
+    }
+
+    private void ClearSession()
+    {
+        UserSession.Clear();
+        _statusMessage = "The workspace selection was cleared.";
+    }
+
+    private bool IsActiveUser(UserSummary user)
+    {
+        return UserSession.CurrentUser?.Id == user.Id;
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void ConfigureEditContext()
+    {
+        _editContext = new EditContext(_form);
+        _validationMessageStore = new ValidationMessageStore(_editContext);
+        _editContext.OnFieldChanged += HandleFieldChanged;
+        _editContext.OnValidationRequested += HandleValidationRequested;
+    }
+
+    private void HandleFieldChanged(object? sender, FieldChangedEventArgs eventArgs)
+    {
+        _validationMessageStore.Clear(eventArgs.FieldIdentifier);
+        _errorMessage = null;
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private void HandleValidationRequested(object? sender, ValidationRequestedEventArgs eventArgs)
+    {
+        ClearServerValidationMessages();
+    }
+
+    private void ClearServerValidationMessages()
+    {
+        _validationMessageStore.Clear();
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private void ApplyApiValidationErrors(SmartTaskManagerApiException apiException)
+    {
+        Dictionary<string, string[]>? errors = apiException.Error?.Errors;
+        if (errors is null || errors.Count == 0)
+        {
+            return;
+        }
+
+        foreach ((string fieldName, string[] messages) in errors)
+        {
+            FieldIdentifier fieldIdentifier = CreateFieldIdentifier(fieldName);
+            _validationMessageStore.Add(fieldIdentifier, messages);
+        }
+
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private FieldIdentifier CreateFieldIdentifier(string fieldName)
+    {
+        string normalizedFieldName = fieldName.Split('.').LastOrDefault() ?? string.Empty;
+
+        if (normalizedFieldName.Equals(nameof(CreateUserFormModel.UserName), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.UserName);
+        }
+
+        return new FieldIdentifier(_form, string.Empty);
+    }
+
+    private static string FormatUserIdentifier(Guid userId)
+    {
+        return userId.ToString("N")[..8].ToUpperInvariant();
+    }
+
+    private string BuildUserSummary()
+    {
+        return _isLoading
+            ? "Loading available profiles."
+            : $"{_users.Count} profile{(_users.Count == 1 ? string.Empty : "s")} available for the current workspace.";
+    }
+
+    private static string BuildErrorMessage(Exception exception)
+    {
+        return exception switch
+        {
+            SmartTaskManagerApiException apiException when apiException.Error?.Errors?.Count > 0
+                => "The API rejected the user profile. Review the highlighted field and try again.",
+            SmartTaskManagerApiException apiException => apiException.Message,
+            SmartTaskManagerApiAccessTokenException tokenException => tokenException.Message,
+            HttpRequestException => "The web app could not reach the API. Start SmartTaskManager.Api and try again.",
+            _ => "The users page could not complete the request."
+        };
+    }
+}

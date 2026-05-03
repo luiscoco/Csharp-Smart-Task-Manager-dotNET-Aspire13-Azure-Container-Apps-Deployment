@@ -1,0 +1,65 @@
+@using System.Security.Claims
+@using SmartTaskManager.Web.Configuration
+
+<nav class="nav-menu">
+    <section class="nav-menu__section">
+        <span class="nav-menu__caption">Pages</span>
+
+        <div class="nav-menu__links">
+            <NavLink class="nav-menu__link" href="/" Match="NavLinkMatch.All">
+                <span class="nav-menu__link-title">Dashboard</span>
+                <span class="nav-menu__link-meta">Summary and recent work</span>
+            </NavLink>
+            <NavLink class="nav-menu__link" href="/users">
+                <span class="nav-menu__link-title">Users</span>
+                <span class="nav-menu__link-meta">Review and manage local task owners</span>
+            </NavLink>
+            <NavLink class="nav-menu__link" href="/tasks">
+                <span class="nav-menu__link-title">Tasks</span>
+                <span class="nav-menu__link-meta">Browse, filter, and update work items</span>
+            </NavLink>
+            <AuthorizeView Policy="@AuthorizationPolicies.RequireEditorRole">
+                <NavLink class="nav-menu__link" href="/tasks/create">
+                    <span class="nav-menu__link-title">Create Task</span>
+                    <span class="nav-menu__link-meta">Capture a new item with validation</span>
+                </NavLink>
+            </AuthorizeView>
+        </div>
+    </section>
+
+    <section class="nav-menu__section">
+        <span class="nav-menu__caption">Security</span>
+
+        <AuthorizeView>
+            <Authorized Context="authenticationState">
+                <div class="nav-menu__session">
+                    <StatusBadge Text="Signed in" Tone="success" />
+                    <strong>@GetDisplayName(authenticationState.User)</strong>
+                    <span>Microsoft Entra authentication is active for this web session.</span>
+                    <LogoutButton ButtonClass="button button--ghost button--small" />
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="nav-menu__session nav-menu__session--empty">
+                    <StatusBadge Text="Sign-in required" Tone="warning" />
+                    <strong>Authentication required</strong>
+                    <span>Use your Microsoft Entra account to enter the workspace.</span>
+                    <a class="button button--small" href="/authentication/login">Sign in</a>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+    </section>
+</nav>
+
+@code {
+    private static string GetDisplayName(ClaimsPrincipal user)
+    {
+        return user.Identity?.Name?.Trim() switch
+        {
+            { Length: > 0 } displayName => displayName,
+            _ => user.FindFirst("name")?.Value
+                ?? user.FindFirst(ClaimTypes.Name)?.Value
+                ?? "Signed-in user"
+        };
+    }
+}

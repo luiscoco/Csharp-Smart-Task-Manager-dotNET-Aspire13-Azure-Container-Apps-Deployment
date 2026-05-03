@@ -1,0 +1,394 @@
+@page "/tasks/{TaskId:guid}"
+@using UiTaskStatus = SmartTaskManager.Web.Models.TaskStatus
+@implements IDisposable
+@inject TasksApiClient TasksApiClient
+@inject UserSession UserSession
+
+<PageTitle>Task Details</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Task details"
+        Title="Task details"
+        Description="Detailed task information and the recorded history for the selected work item.">
+        <Actions>
+            <a class="button button--ghost" href="/tasks">Back to tasks</a>
+        </Actions>
+    </PageHeader>
+
+    @if (!UserSession.HasActiveUser)
+    {
+        <EmptyState
+            Title="Task details require an active user"
+            Description="Select a local task owner first so the web app can load the matching task routes.">
+            <Actions>
+                <a class="button" href="/users">Choose user</a>
+            </Actions>
+        </EmptyState>
+    }
+    else if (_isLoading)
+    {
+        <LoadingState
+            Title="Loading task details"
+            Description="Retrieving the task and its history from SmartTaskManager.Api." />
+    }
+    else if (_errorMessage is not null)
+    {
+        <FeedbackCallout
+            Tone="danger"
+            Title="Task unavailable"
+            Message="@_errorMessage" />
+    }
+    else if (_task is not null)
+    {
+        @if (_statusMessage is not null)
+        {
+            <FeedbackCallout
+                Tone="success"
+                Title="Task updated"
+                Message="@_statusMessage" />
+        }
+
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <p class="panel__eyebrow">Overview</p>
+                    <h2 class="panel__title">@_task.Title</h2>
+                    <div class="panel__badges">
+                        <StatusBadge Text="@FormatStatus(_task.Status)" Tone="@GetStatusTone(_task.Status)" />
+                        <StatusBadge Text="@_task.Priority.ToString()" Tone="@GetPriorityTone(_task.Priority)" />
+                        @if (_task.IsOverdue)
+                        {
+                            <StatusBadge Text="Overdue" Tone="danger" />
+                        }
+                    </div>
+                </div>
+
+                <div class="task-card__actions">
+                    @if (_task.Status is not UiTaskStatus.Completed and not UiTaskStatus.Archived)
+                    {
+                        <button class="button button--ghost button--small" type="button" @onclick="CompleteTaskAsync" disabled="@_isBusy">
+                            Complete
+                        </button>
+                    }
+
+                    @if (_task.Status != UiTaskStatus.Archived)
+                    {
+                        <button class="button button--ghost button--small" type="button" @onclick="ArchiveTaskAsync" disabled="@_isBusy">
+                            Archive
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="detail-grid">
+                <article class="detail-card">
+                    <span>Status</span>
+                    <StatusBadge Text="@FormatStatus(_task.Status)" Tone="@GetStatusTone(_task.Status)" />
+                </article>
+                <article class="detail-card">
+                    <span>Priority</span>
+                    <StatusBadge Text="@_task.Priority.ToString()" Tone="@GetPriorityTone(_task.Priority)" />
+                </article>
+                <article class="detail-card">
+                    <span>Category</span>
+                    <strong>@GetCategoryName(_task)</strong>
+                </article>
+                <article class="detail-card">
+                    <span>Task type</span>
+                    <strong>@_task.TaskType</strong>
+                </article>
+                <article class="detail-card">
+                    <span>Owner</span>
+                    <strong>@UserSession.CurrentUser!.UserName</strong>
+                </article>
+                <article class="detail-card">
+                    <span>Due date</span>
+                    <strong>@_task.DueDate.ToLocalTime().ToString("dd MMM yyyy")</strong>
+                </article>
+                <article class="detail-card">
+                    <span>History entries</span>
+                    <strong>@_task.HistoryCount</strong>
+                </article>
+            </div>
+
+            <p class="task-card__description">@GetTaskDescription(_task)</p>
+
+            <TaskPriorityEditor
+                CurrentPriority="_task.Priority"
+                Disabled="_isBusy"
+                CanEdit="@CanUpdatePriority(_task)"
+                HelpText="Save a new priority through the existing task API."
+                ReadOnlyMessage="Completed and archived tasks cannot be reprioritized."
+                OnSave="UpdateTaskPriorityAsync" />
+        </section>
+
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <p class="panel__eyebrow">History</p>
+                    <h2 class="panel__title">Recorded lifecycle</h2>
+                </div>
+            </div>
+
+            @if (_history.Count == 0)
+            {
+                <EmptyState
+                    Eyebrow="No activity"
+                    Title="No history entries"
+                    Description="This task has not recorded any state changes yet." />
+            }
+            else
+            {
+                <div class="history-list">
+                    @foreach (TaskHistoryEntry entry in _history)
+                    {
+                        <article class="history-entry">
+                            <span class="history-entry__time">@entry.OccurredOnUtc.ToLocalTime().ToString("dd MMM yyyy HH:mm")</span>
+                            <h3>@entry.Action</h3>
+                            <p>@entry.Details</p>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public Guid TaskId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "created")]
+    public bool Created { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isBusy;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private TaskItem? _task;
+    private IReadOnlyCollection<TaskHistoryEntry> _history = Array.Empty<TaskHistoryEntry>();
+
+    protected override void OnInitialized()
+    {
+        UserSession.Changed += HandleSessionChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _statusMessage = Created
+            ? "Task created successfully."
+            : null;
+
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        UserSession.Changed -= HandleSessionChanged;
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(LoadAsync);
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorMessage = null;
+        _task = null;
+        _history = Array.Empty<TaskHistoryEntry>();
+
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            Task<TaskItem> taskRequest = TasksApiClient.GetTaskAsync(userId, TaskId);
+            Task<IReadOnlyCollection<TaskHistoryEntry>> historyRequest = TasksApiClient.GetTaskHistoryAsync(userId, TaskId);
+
+            await Task.WhenAll(taskRequest, historyRequest);
+
+            _task = taskRequest.Result;
+            _history = historyRequest.Result
+                .OrderByDescending(entry => entry.OccurredOnUtc)
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CompleteTaskAsync()
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.CompleteTaskAsync(userId, TaskId);
+            _statusMessage = $"Marked '{task.Title}' as completed.";
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task UpdateTaskPriorityAsync(TaskPriority priority)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.UpdateTaskPriorityAsync(
+                userId,
+                TaskId,
+                new UpdateTaskPriorityRequest(priority));
+
+            _statusMessage = $"Updated '{task.Title}' to {task.Priority} priority.";
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ArchiveTaskAsync()
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _isBusy = true;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.ArchiveTaskAsync(userId, TaskId);
+            _statusMessage = $"Archived '{task.Title}'.";
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private bool TryGetCurrentUserId(out Guid userId)
+    {
+        if (UserSession.CurrentUser is not null)
+        {
+            userId = UserSession.CurrentUser.Id;
+            return true;
+        }
+
+        userId = Guid.Empty;
+        return false;
+    }
+
+    private static string GetTaskDescription(TaskItem task)
+    {
+        return string.IsNullOrWhiteSpace(task.Description)
+            ? "No description was provided for this task."
+            : task.Description;
+    }
+
+    private static string GetCategoryName(TaskItem task)
+    {
+        return string.IsNullOrWhiteSpace(task.CategoryName)
+            ? "General"
+            : task.CategoryName;
+    }
+
+    private static bool CanUpdatePriority(TaskItem task)
+    {
+        return task.Status is not UiTaskStatus.Completed and not UiTaskStatus.Archived;
+    }
+
+    private static string GetPriorityTone(TaskPriority priority)
+    {
+        return priority switch
+        {
+            TaskPriority.Low => "neutral",
+            TaskPriority.Medium => "warning",
+            TaskPriority.High => "accent",
+            TaskPriority.Critical => "danger",
+            _ => "neutral"
+        };
+    }
+
+    private static string GetStatusTone(UiTaskStatus status)
+    {
+        return status switch
+        {
+            UiTaskStatus.Pending => "neutral",
+            UiTaskStatus.InProgress => "accent",
+            UiTaskStatus.Completed => "success",
+            UiTaskStatus.Archived => "warning",
+            _ => "neutral"
+        };
+    }
+
+    private static string FormatStatus(UiTaskStatus status)
+    {
+        return status switch
+        {
+            UiTaskStatus.InProgress => "In Progress",
+            _ => status.ToString()
+        };
+    }
+
+    private static string BuildErrorMessage(Exception exception)
+    {
+        return exception switch
+        {
+            SmartTaskManagerApiException apiException => apiException.Message,
+            SmartTaskManagerApiAccessTokenException tokenException => tokenException.Message,
+            HttpRequestException => "The web app could not reach the API. Start SmartTaskManager.Api and try again.",
+            _ => "The task details page could not complete the request."
+        };
+    }
+}

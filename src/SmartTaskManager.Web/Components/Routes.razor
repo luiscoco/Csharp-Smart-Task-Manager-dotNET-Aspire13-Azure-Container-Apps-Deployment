@@ -1,0 +1,26 @@
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <EmptyState
+                        Eyebrow="Authentication required"
+                        Title="Sign in to continue"
+                        Description="Use your Microsoft Entra account to open the SmartTaskManager workspace.">
+                        <Actions>
+                            <a class="button" href="/authentication/login">Sign in</a>
+                        </Actions>
+                    </EmptyState>
+                </LayoutView>
+            </NotAuthorized>
+            <Authorizing>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <LoadingState
+                        Title="Checking access"
+                        Description="Confirming your Microsoft Entra session." />
+                </LayoutView>
+            </Authorizing>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

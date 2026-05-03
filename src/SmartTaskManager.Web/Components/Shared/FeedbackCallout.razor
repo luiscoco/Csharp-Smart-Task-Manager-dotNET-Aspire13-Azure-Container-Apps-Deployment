@@ -1,0 +1,38 @@
+<section class="@CssClass" role="status" aria-live="polite">
+    <div class="callout__copy">
+        @if (!string.IsNullOrWhiteSpace(Title))
+        {
+            <strong class="callout__title">@Title</strong>
+        }
+
+        <p>@Message</p>
+    </div>
+
+    @if (Actions is not null)
+    {
+        <div class="callout__actions">
+            @Actions
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Tone { get; set; } = "info";
+
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    private string CssClass => Tone switch
+    {
+        "success" => "callout callout--success",
+        "danger" => "callout callout--danger",
+        _ => "callout callout--info"
+    };
+}

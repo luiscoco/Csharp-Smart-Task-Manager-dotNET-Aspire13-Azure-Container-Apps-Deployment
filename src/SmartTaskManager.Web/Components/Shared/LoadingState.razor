@@ -1,0 +1,20 @@
+<section class="loading-panel loading-panel--rich" role="status" aria-live="polite" aria-busy="true">
+    <span class="loading-panel__pulse" aria-hidden="true"></span>
+
+    <div class="loading-panel__copy">
+        <h2>@Title</h2>
+
+        @if (!string.IsNullOrWhiteSpace(Description))
+        {
+            <p>@Description</p>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Description { get; set; }
+}

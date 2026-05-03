@@ -1,0 +1,25 @@
+<article class="@CssClass">
+    <span class="metric-card__label">@Label</span>
+    <strong class="metric-card__value">@Value</strong>
+
+    @if (!string.IsNullOrWhiteSpace(Note))
+    {
+        <p class="metric-card__note">@Note</p>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Note { get; set; }
+
+    [Parameter]
+    public string Tone { get; set; } = "neutral";
+
+    private string CssClass => $"metric-card metric-card--{Tone}";
+}

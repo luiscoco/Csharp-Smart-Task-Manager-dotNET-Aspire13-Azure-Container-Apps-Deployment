@@ -1,0 +1,83 @@
+<div class="priority-editor">
+    <div class="field field--compact priority-editor__field">
+        <label class="field__label" for="@InputId">@Label</label>
+        <select
+            id="@InputId"
+            class="field__input"
+            @bind="_selectedPriority"
+            disabled="@(!CanEdit || Disabled)">
+            @foreach (TaskPriority priority in Enum.GetValues<TaskPriority>())
+            {
+                <option value="@priority">@priority</option>
+            }
+        </select>
+    </div>
+
+    <button
+        class="button button--ghost button--small"
+        type="button"
+        @onclick="HandleSaveAsync"
+        disabled="@(!CanSubmit)">
+        @ButtonText
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(HelpText))
+{
+    <p class="field__help">@HelpText</p>
+}
+
+@if (!CanEdit && !string.IsNullOrWhiteSpace(ReadOnlyMessage))
+{
+    <p class="field__help">@ReadOnlyMessage</p>
+}
+
+@code {
+    private readonly string InputId = $"priority-editor-input-{Guid.NewGuid():N}";
+    private TaskPriority _selectedPriority;
+    private bool _isInitialized;
+    private TaskPriority _lastKnownPriority;
+
+    [Parameter, EditorRequired]
+    public TaskPriority CurrentPriority { get; set; }
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public bool CanEdit { get; set; } = true;
+
+    [Parameter]
+    public string Label { get; set; } = "Priority";
+
+    [Parameter]
+    public string ButtonText { get; set; } = "Update priority";
+
+    [Parameter]
+    public string? HelpText { get; set; }
+
+    [Parameter]
+    public string? ReadOnlyMessage { get; set; }
+
+    [Parameter]
+    public EventCallback<TaskPriority> OnSave { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!_isInitialized || CurrentPriority != _lastKnownPriority)
+        {
+            _selectedPriority = CurrentPriority;
+            _lastKnownPriority = CurrentPriority;
+            _isInitialized = true;
+        }
+    }
+
+    private bool CanSubmit => CanEdit && !Disabled && _selectedPriority != CurrentPriority;
+
+    private Task HandleSaveAsync()
+    {
+        return CanSubmit
+            ? OnSave.InvokeAsync(_selectedPriority)
+            : Task.CompletedTask;
+    }
+}

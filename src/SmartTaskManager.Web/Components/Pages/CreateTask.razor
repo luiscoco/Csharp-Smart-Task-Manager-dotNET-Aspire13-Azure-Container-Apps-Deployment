@@ -1,0 +1,314 @@
+@page "/tasks/create"
+@using SmartTaskManager.Web.Configuration
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireEditorRole)]
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject TasksApiClient TasksApiClient
+@inject UserSession UserSession
+
+<PageTitle>Create Task</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Create task"
+        Title="Create a new task"
+        Description="This page posts directly to the existing protected task creation endpoint through the web app service layer.">
+        <Actions>
+            <a class="button button--ghost" href="/tasks">Back to tasks</a>
+        </Actions>
+    </PageHeader>
+
+    @if (!UserSession.HasActiveUser)
+    {
+        <EmptyState
+            Title="Create Task requires an active user"
+            Description="Select a local task owner first so the web app can submit the task on that user's route.">
+            <Actions>
+                <a class="button" href="/users">Choose user</a>
+            </Actions>
+        </EmptyState>
+    }
+    else
+    {
+        @if (_errorMessage is not null)
+        {
+            <FeedbackCallout
+                Tone="danger"
+                Title="Task could not be created"
+                Message="@_errorMessage" />
+        }
+
+        <div class="grid grid--2">
+            <section class="panel">
+                <div class="panel__header">
+                    <div>
+                        <p class="panel__eyebrow">Task form</p>
+                        <h2 class="panel__title">New task for @UserSession.CurrentUser!.UserName</h2>
+                        <p class="panel__meta">The form stays small, validates early, and sends the final request through the typed task API client.</p>
+                    </div>
+                </div>
+
+                <EditForm EditContext="_editContext" FormName="create-task" OnValidSubmit="HandleSubmitAsync" OnInvalidSubmit="HandleInvalidSubmit" class="field-grid">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="validation-summary" />
+
+                    <div class="field">
+                        <label class="field__label" for="title">Title</label>
+                        <InputText id="title" class="field__input" @bind-Value="_form.Title" maxlength="200" />
+                        <p class="field__help">Required. Keep it short and specific so the task list stays readable.</p>
+                        <ValidationMessage For="@(() => _form.Title)" />
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="description">Description</label>
+                        <InputTextArea id="description" class="field__textarea" @bind-Value="_form.Description" maxlength="2000" />
+                        <p class="field__help">Optional. Add the context someone needs to complete the task.</p>
+                        <ValidationMessage For="@(() => _form.Description)" />
+                    </div>
+
+                    <div class="grid grid--2">
+                        <div class="field">
+                            <label class="field__label" for="dueDate">Due date</label>
+                            <InputDate id="dueDate" class="field__input" @bind-Value="_form.DueDate" min="@MinimumDueDateText" />
+                            <p class="field__help">Required. Choose today or a future date.</p>
+                            <ValidationMessage For="@(() => _form.DueDate)" />
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="priority">Priority</label>
+                            <InputSelect id="priority" class="field__input" @bind-Value="_form.Priority">
+                                @foreach (TaskPriority priority in Enum.GetValues<TaskPriority>())
+                                {
+                                    <option value="@priority">@priority</option>
+                                }
+                            </InputSelect>
+                        </div>
+                    </div>
+
+                    <div class="grid grid--2">
+                        <div class="field">
+                            <label class="field__label" for="taskType">Task type</label>
+                            <InputSelect id="taskType" class="field__input" @bind-Value="_form.TaskType">
+                                @foreach (TaskKind taskKind in Enum.GetValues<TaskKind>())
+                                {
+                                    <option value="@taskKind">@taskKind</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="category">Category</label>
+                            <InputText id="category" class="field__input" @bind-Value="_form.CategoryName" maxlength="100" />
+                            <p class="field__help">Optional. Leave it blank if the task does not need a category.</p>
+                            <ValidationMessage For="@(() => _form.CategoryName)" />
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="button" type="submit" disabled="@_isSubmitting">Create task</button>
+                    </div>
+                </EditForm>
+            </section>
+
+            <section class="panel">
+                <div class="panel__header">
+                    <div>
+                        <p class="panel__eyebrow">Notes</p>
+                        <h2 class="panel__title">Task creation checklist</h2>
+                    </div>
+                </div>
+
+                <div class="stack">
+                    <article class="detail-card">
+                        <span>Protected endpoint</span>
+                        <strong>The form submits with the signed-in user's Entra access token attached by the service layer.</strong>
+                    </article>
+                    <article class="detail-card">
+                        <span>Clean separation</span>
+                        <strong>The web app sends HTTP requests to the API instead of referencing backend services.</strong>
+                    </article>
+                    <article class="detail-card">
+                        <span>Course-friendly</span>
+                        <strong>All logic stays in one Blazor project with no extra .Client project to manage.</strong>
+                    </article>
+                </div>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly CreateTaskFormModel _form = new();
+    private EditContext _editContext = default!;
+    private ValidationMessageStore _validationMessageStore = default!;
+    private bool _isSubmitting;
+    private string? _errorMessage;
+    private string MinimumDueDateText => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
+
+    protected override void OnInitialized()
+    {
+        UserSession.Changed += HandleSessionChanged;
+        ConfigureEditContext();
+    }
+
+    public void Dispose()
+    {
+        UserSession.Changed -= HandleSessionChanged;
+        _editContext.OnFieldChanged -= HandleFieldChanged;
+        _editContext.OnValidationRequested -= HandleValidationRequested;
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        ClearServerValidationMessages();
+        _errorMessage = null;
+
+        if (UserSession.CurrentUser is null || _form.DueDate is null)
+        {
+            _errorMessage = "Select a user and provide a due date before submitting.";
+            return;
+        }
+
+        _isSubmitting = true;
+
+        try
+        {
+            CreateTaskRequest request = new(
+                _form.Title.Trim(),
+                (_form.Description ?? string.Empty).Trim(),
+                BuildDueDateUtc(_form.DueDate.Value),
+                _form.Priority,
+                string.IsNullOrWhiteSpace(_form.CategoryName) ? null : _form.CategoryName.Trim(),
+                _form.TaskType);
+
+            TaskItem createdTask = await TasksApiClient.CreateTaskAsync(
+                UserSession.CurrentUser.Id,
+                request);
+
+            NavigationManager.NavigateTo($"/tasks/{createdTask.Id}?created=true");
+        }
+        catch (SmartTaskManagerApiException apiException)
+        {
+            ApplyApiValidationErrors(apiException);
+            _errorMessage = BuildErrorMessage(apiException);
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private void HandleInvalidSubmit(EditContext editContext)
+    {
+        _errorMessage = "Correct the highlighted fields and try again.";
+    }
+
+    private static DateTime BuildDueDateUtc(DateOnly dueDate)
+    {
+        DateTime localDateTime = dueDate.ToDateTime(new TimeOnly(23, 59), DateTimeKind.Local);
+        return localDateTime.ToUniversalTime();
+    }
+
+    private void ConfigureEditContext()
+    {
+        _editContext = new EditContext(_form);
+        _validationMessageStore = new ValidationMessageStore(_editContext);
+        _editContext.OnFieldChanged += HandleFieldChanged;
+        _editContext.OnValidationRequested += HandleValidationRequested;
+    }
+
+    private void HandleFieldChanged(object? sender, FieldChangedEventArgs eventArgs)
+    {
+        _validationMessageStore.Clear(eventArgs.FieldIdentifier);
+        _errorMessage = null;
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private void HandleValidationRequested(object? sender, ValidationRequestedEventArgs eventArgs)
+    {
+        ClearServerValidationMessages();
+    }
+
+    private void ClearServerValidationMessages()
+    {
+        _validationMessageStore.Clear();
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private void ApplyApiValidationErrors(SmartTaskManagerApiException apiException)
+    {
+        Dictionary<string, string[]>? errors = apiException.Error?.Errors;
+        if (errors is null || errors.Count == 0)
+        {
+            return;
+        }
+
+        foreach ((string fieldName, string[] messages) in errors)
+        {
+            FieldIdentifier fieldIdentifier = CreateFieldIdentifier(fieldName);
+            _validationMessageStore.Add(fieldIdentifier, messages);
+        }
+
+        _editContext.NotifyValidationStateChanged();
+    }
+
+    private FieldIdentifier CreateFieldIdentifier(string fieldName)
+    {
+        string normalizedFieldName = fieldName.Split('.').LastOrDefault() ?? string.Empty;
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.Title), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.Title);
+        }
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.Description), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.Description);
+        }
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.DueDate), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.DueDate);
+        }
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.Priority), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.Priority);
+        }
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.CategoryName), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.CategoryName);
+        }
+
+        if (normalizedFieldName.Equals(nameof(CreateTaskFormModel.TaskType), StringComparison.OrdinalIgnoreCase))
+        {
+            return FieldIdentifier.Create(() => _form.TaskType);
+        }
+
+        return new FieldIdentifier(_form, string.Empty);
+    }
+
+    private void HandleSessionChanged()
+    {
+        _errorMessage = null;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string BuildErrorMessage(Exception exception)
+    {
+        return exception switch
+        {
+            SmartTaskManagerApiException apiException when apiException.Error?.Errors?.Count > 0
+                => "The API rejected the task. Review the highlighted fields and try again.",
+            SmartTaskManagerApiException apiException => apiException.Message,
+            SmartTaskManagerApiAccessTokenException tokenException => tokenException.Message,
+            HttpRequestException => "The web app could not reach the API. Start SmartTaskManager.Api and try again.",
+            _ => "The task could not be created."
+        };
+    }
+}

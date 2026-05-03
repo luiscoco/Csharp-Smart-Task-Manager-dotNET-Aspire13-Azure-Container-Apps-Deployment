@@ -1,0 +1,15 @@
+<form class="@FormClass" method="post" action="/authentication/logout">
+    <AntiforgeryToken />
+    <button class="@ButtonClass" type="submit">@Text</button>
+</form>
+
+@code {
+    [Parameter]
+    public string ButtonClass { get; set; } = "button button--small";
+
+    [Parameter]
+    public string FormClass { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Text { get; set; } = "Sign out";
+}

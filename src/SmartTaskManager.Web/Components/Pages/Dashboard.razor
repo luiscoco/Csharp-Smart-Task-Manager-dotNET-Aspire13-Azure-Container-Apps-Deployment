@@ -1,0 +1,164 @@
+@page "/"
+@implements IDisposable
+@inject TasksApiClient TasksApiClient
+@inject UserSession UserSession
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Dashboard"
+        Title="Portfolio dashboard"
+        Description="A quick operational summary for the currently selected user, backed by SmartTaskManager.Api.">
+        <Actions>
+            <a class="button button--secondary" href="/users">Switch user</a>
+        </Actions>
+    </PageHeader>
+
+    @if (!UserSession.HasActiveUser)
+    {
+        <EmptyState
+            Eyebrow="Dashboard locked"
+            Title="No workspace user selected"
+            Description="Pick a user first so the dashboard can load API-backed task data.">
+            <Actions>
+                <a class="button" href="/users">Open users</a>
+            </Actions>
+        </EmptyState>
+    }
+    else if (_isLoading)
+    {
+        <LoadingState
+            Title="Loading dashboard"
+            Description="@($"Pulling the latest summary and recent tasks for {UserSession.CurrentUser!.UserName}.")" />
+    }
+    else if (_errorMessage is not null)
+    {
+        <FeedbackCallout
+            Tone="danger"
+            Title="Dashboard unavailable"
+            Message="@_errorMessage" />
+    }
+    else if (_summary is not null)
+    {
+        <section class="grid grid--metrics">
+            <MetricCard Label="Total Tasks" Value="@_summary.TotalTasks.ToString()" Note="Everything assigned to the selected user." Tone="accent" />
+            <MetricCard Label="Completed" Value="@_summary.CompletedTasks.ToString()" Note="Work already finished." Tone="success" />
+            <MetricCard Label="Pending" Value="@_summary.PendingTasks.ToString()" Note="Tasks waiting for attention." Tone="warning" />
+            <MetricCard Label="Overdue" Value="@_summary.OverdueTasks.ToString()" Note="Tasks that have already passed their due date." Tone="danger" />
+        </section>
+
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <p class="panel__eyebrow">Recent tasks</p>
+                    <h2 class="panel__title">Next work items for @UserSession.CurrentUser!.UserName</h2>
+                    <p class="panel__meta">The dashboard surfaces the earliest due tasks first so the most urgent work stays visible.</p>
+                </div>
+
+                <a class="button button--ghost button--small" href="/tasks">Open task list</a>
+            </div>
+
+            @if (_recentTasks.Count == 0)
+            {
+                <EmptyState
+                    Eyebrow="No recent work"
+                    Title="No tasks yet"
+                    Description="Create the first task to see it appear on the dashboard.">
+                    <Actions>
+                        <a class="button" href="/tasks/create">Create task</a>
+                    </Actions>
+                </EmptyState>
+            }
+            else
+            {
+                <div class="task-list">
+                    @foreach (TaskItem task in _recentTasks)
+                    {
+                        <TaskCard
+                            Task="task"
+                            ShowOwner="false"
+                            ShowHistoryCount="false" />
+                    }
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private bool _isLoading = true;
+    private string? _errorMessage;
+    private TaskDashboardSummary? _summary;
+    private IReadOnlyCollection<TaskItem> _recentTasks = Array.Empty<TaskItem>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserSession.Changed += HandleSessionChanged;
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        UserSession.Changed -= HandleSessionChanged;
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(LoadAsync);
+    }
+
+    private async Task LoadAsync()
+    {
+        _errorMessage = null;
+        _summary = null;
+        _recentTasks = Array.Empty<TaskItem>();
+
+        if (!UserSession.HasActiveUser || UserSession.CurrentUser is null)
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            Task<TaskDashboardSummary> dashboardTask = TasksApiClient.GetDashboardSummaryAsync(
+                UserSession.CurrentUser.Id);
+
+            Task<IReadOnlyCollection<TaskItem>> tasksTask = TasksApiClient.ListTasksAsync(
+                UserSession.CurrentUser.Id);
+
+            await Task.WhenAll(dashboardTask, tasksTask);
+
+            _summary = dashboardTask.Result;
+            _recentTasks = tasksTask.Result
+                .OrderBy(task => task.DueDate)
+                .Take(5)
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildErrorMessage(Exception exception)
+    {
+        return exception switch
+        {
+            SmartTaskManagerApiException apiException => apiException.Message,
+            SmartTaskManagerApiAccessTokenException tokenException => tokenException.Message,
+            HttpRequestException => "The web app could not reach the API. Start SmartTaskManager.Api and try again.",
+            _ => "The dashboard could not be loaded."
+        };
+    }
+}

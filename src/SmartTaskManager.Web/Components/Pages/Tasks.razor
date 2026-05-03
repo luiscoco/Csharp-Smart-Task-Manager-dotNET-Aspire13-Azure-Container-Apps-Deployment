@@ -1,0 +1,325 @@
+@page "/tasks"
+@using SmartTaskManager.Web.Configuration
+@implements IDisposable
+@inject TasksApiClient TasksApiClient
+@inject UserSession UserSession
+
+<PageTitle>Tasks</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Tasks"
+        Title="Task workspace"
+        Description="Browse tasks for the selected user and filter them by status or priority without moving HTTP logic into the page.">
+        <Actions>
+            <AuthorizeView Policy="@AuthorizationPolicies.RequireEditorRole">
+                <a class="button button--secondary" href="/tasks/create">Create task</a>
+            </AuthorizeView>
+        </Actions>
+    </PageHeader>
+
+    @if (!UserSession.HasActiveUser)
+    {
+        <EmptyState
+            Title="Task pages need an active user"
+            Description="Select a local task owner first so the web app can load that user's task routes.">
+            <Actions>
+                <a class="button" href="/users">Choose user</a>
+            </Actions>
+        </EmptyState>
+    }
+    else
+    {
+        @if (_errorMessage is not null)
+        {
+            <FeedbackCallout
+                Tone="danger"
+                Title="Tasks unavailable"
+                Message="@_errorMessage" />
+        }
+
+        @if (_statusMessage is not null)
+        {
+            <FeedbackCallout
+                Tone="success"
+                Title="Task updated"
+                Message="@_statusMessage" />
+        }
+
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <p class="panel__eyebrow">Task list</p>
+                    <h2 class="panel__title">@UserSession.CurrentUser!.UserName's tasks</h2>
+                    <p class="panel__meta">@BuildTaskSummary()</p>
+                </div>
+
+                @if (_filter.HasActiveFilters)
+                {
+                    <div class="panel__badges">
+                        <StatusBadge Text="@BuildFilterSummary()" Tone="accent" />
+                    </div>
+                }
+            </div>
+
+            <TaskFilterBar
+                Filter="_filter"
+                Disabled="_isLoading"
+                HelpText="Use the service layer to filter by status, priority, or both."
+                OnApply="LoadTasksAsync"
+                OnReset="LoadTasksAsync" />
+
+            @if (_isLoading)
+            {
+                <LoadingState
+                    Title="Loading tasks"
+                    Description="Fetching the latest task list and applying the current filters." />
+            }
+            else if (_tasks.Count == 0)
+            {
+                <EmptyState
+                    Eyebrow="@(_filter.HasActiveFilters ? "Filtered results" : "No tasks")"
+                    Title="No tasks matched the current filter"
+                    Description="Create a task or clear the active filters to see more work items.">
+                    <Actions>
+                        <AuthorizeView Policy="@AuthorizationPolicies.RequireEditorRole">
+                            <a class="button" href="/tasks/create">Create task</a>
+                        </AuthorizeView>
+                    </Actions>
+                </EmptyState>
+            }
+            else
+            {
+                <div class="task-list">
+                    @foreach (TaskItem task in _tasks)
+                    {
+                        <TaskCard
+                            Task="task"
+                            OwnerName="@UserSession.CurrentUser!.UserName"
+                            ShowOwner="true"
+                            ShowHistoryCount="true"
+                            ShowActions="true"
+                            ShowPriorityEditor="true"
+                            IsBusy="@(_busyTaskId == task.Id)"
+                            OnPriorityChanged="UpdateTaskPriorityAsync"
+                            OnComplete="CompleteTaskAsync"
+                            OnArchive="ArchiveTaskAsync" />
+                    }
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private readonly TaskListViewFilter _filter = new();
+    private bool _isLoading = true;
+    private Guid? _busyTaskId;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private IReadOnlyCollection<TaskItem> _tasks = Array.Empty<TaskItem>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserSession.Changed += HandleSessionChanged;
+        await LoadTasksAsyncCore(clearStatusMessage: true);
+    }
+
+    public void Dispose()
+    {
+        UserSession.Changed -= HandleSessionChanged;
+    }
+
+    private Task LoadTasksAsync()
+    {
+        return LoadTasksAsyncCore(clearStatusMessage: true);
+    }
+
+    private async Task LoadTasksAsyncCore(bool clearStatusMessage)
+    {
+        _errorMessage = null;
+
+        if (clearStatusMessage)
+        {
+            _statusMessage = null;
+        }
+
+        if (!UserSession.HasActiveUser || UserSession.CurrentUser is null)
+        {
+            _tasks = Array.Empty<TaskItem>();
+            _isLoading = false;
+            return;
+        }
+
+        _isLoading = true;
+
+        try
+        {
+            _tasks = (await TasksApiClient.ListTasksAsync(
+                    UserSession.CurrentUser.Id,
+                    _filter.Status,
+                    _filter.Priority))
+                .OrderBy(task => task.DueDate)
+                .ThenBy(task => task.Title)
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task UpdateTaskPriorityAsync(TaskPriorityChangeCommand command)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _busyTaskId = command.TaskId;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.UpdateTaskPriorityAsync(
+                userId,
+                command.TaskId,
+                new UpdateTaskPriorityRequest(command.Priority));
+
+            _statusMessage = $"Updated '{task.Title}' to {task.Priority} priority.";
+            await LoadTasksAsyncCore(clearStatusMessage: false);
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _busyTaskId = null;
+        }
+    }
+
+    private async Task CompleteTaskAsync(Guid taskId)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _busyTaskId = taskId;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.CompleteTaskAsync(userId, taskId);
+            _statusMessage = $"Marked '{task.Title}' as completed.";
+            await LoadTasksAsyncCore(clearStatusMessage: false);
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _busyTaskId = null;
+        }
+    }
+
+    private async Task ArchiveTaskAsync(Guid taskId)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return;
+        }
+
+        _busyTaskId = taskId;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            TaskItem task = await TasksApiClient.ArchiveTaskAsync(userId, taskId);
+            _statusMessage = $"Archived '{task.Title}'.";
+            await LoadTasksAsyncCore(clearStatusMessage: false);
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = BuildErrorMessage(exception);
+        }
+        finally
+        {
+            _busyTaskId = null;
+        }
+    }
+
+    private void HandleSessionChanged()
+    {
+        _ = InvokeAsync(LoadTasksAsync);
+    }
+
+    private bool TryGetCurrentUserId(out Guid userId)
+    {
+        if (UserSession.CurrentUser is not null)
+        {
+            userId = UserSession.CurrentUser.Id;
+            return true;
+        }
+
+        userId = Guid.Empty;
+        return false;
+    }
+
+    private string BuildTaskSummary()
+    {
+        if (_isLoading)
+        {
+            return "Loading the task workspace.";
+        }
+
+        int overdueCount = _tasks.Count(task => task.IsOverdue);
+        return $"{_tasks.Count} visible task{(_tasks.Count == 1 ? string.Empty : "s")} with {overdueCount} overdue.";
+    }
+
+    private string BuildFilterSummary()
+    {
+        List<string> parts = new();
+
+        if (_filter.Status.HasValue)
+        {
+            parts.Add(FormatStatus(_filter.Status.Value));
+        }
+
+        if (_filter.Priority.HasValue)
+        {
+            parts.Add($"{_filter.Priority.Value} priority");
+        }
+
+        return string.Join(" • ", parts);
+    }
+
+    private static string FormatStatus(SmartTaskManager.Web.Models.TaskStatus status)
+    {
+        return status switch
+        {
+            SmartTaskManager.Web.Models.TaskStatus.InProgress => "In Progress",
+            _ => status.ToString()
+        };
+    }
+
+    private static string BuildErrorMessage(Exception exception)
+    {
+        return exception switch
+        {
+            SmartTaskManagerApiException apiException => apiException.Message,
+            SmartTaskManagerApiAccessTokenException tokenException => tokenException.Message,
+            HttpRequestException => "The web app could not reach the API. Start SmartTaskManager.Api and try again.",
+            _ => "The task list could not be loaded."
+        };
+    }
+}

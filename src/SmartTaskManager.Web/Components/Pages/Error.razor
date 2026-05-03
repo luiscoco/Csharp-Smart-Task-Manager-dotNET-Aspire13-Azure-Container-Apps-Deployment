@@ -1,0 +1,38 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error</PageTitle>
+
+<div class="page-stack">
+    <PageHeader
+        Eyebrow="Application error"
+        Title="Something interrupted the current request"
+        Description="An unhandled exception reached the top-level Blazor error pipeline." />
+
+    <div class="callout callout--danger">
+        @if (ShowRequestId)
+        {
+            <p>Request ID: @RequestId</p>
+        }
+        else
+        {
+            <p>No request identifier was available for this error.</p>
+        }
+
+        <p>For local debugging, run the app in the Development environment and reproduce the failing request.</p>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    private bool ShowRequestId => !string.IsNullOrWhiteSpace(RequestId);
+
+    protected override void OnInitialized()
+    {
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+    }
+}

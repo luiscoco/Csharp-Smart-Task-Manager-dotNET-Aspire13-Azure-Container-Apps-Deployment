@@ -1,0 +1,84 @@
+@using System.Security.Claims
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <aside class="shell__sidebar">
+        <a class="brand-panel" href="/">
+            <span class="brand-panel__eyebrow">Portfolio Front End</span>
+            <strong>Smart Task Manager</strong>
+            <span class="brand-panel__meta">Blazor Web App with server interactivity</span>
+        </a>
+
+        <NavMenu />
+    </aside>
+
+    <div class="shell__main">
+        <header class="shell__header">
+            <div class="shell__intro">
+                <p class="shell__eyebrow">Connected Workspace</p>
+                <h2>Manage users and tasks through the existing SmartTaskManager Web API.</h2>
+
+                <div class="shell__actions">
+                    <a class="button button--ghost button--small" href="/tasks">Task workspace</a>
+
+                    <AuthorizeView>
+                        <Authorized>
+                            <LogoutButton ButtonClass="button button--small" />
+                        </Authorized>
+                        <NotAuthorized>
+                            <a class="button button--small" href="/authentication/login">Sign in</a>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                </div>
+            </div>
+
+            <div class="shell__status-grid">
+                <AuthorizeView>
+                    <Authorized Context="authenticationState">
+                        <section class="session-panel session-panel--active">
+                            <span class="session-panel__label">Signed-in user</span>
+                            <strong>@GetDisplayName(authenticationState.User)</strong>
+                            <span>Microsoft Entra sign-in is active and persisted with a secure application cookie.</span>
+                        </section>
+                    </Authorized>
+                    <NotAuthorized>
+                        <section class="session-panel">
+                            <span class="session-panel__label">Signed-in user</span>
+                            <strong>Authentication required</strong>
+                            <span>Use Microsoft Entra ID to access the SmartTaskManager workspace.</span>
+                        </section>
+                    </NotAuthorized>
+                </AuthorizeView>
+
+                <section class="session-panel session-panel--secondary">
+                    <span class="session-panel__label">Session model</span>
+                    <strong>OpenID Connect sign-in with a secure cookie session</strong>
+                    <span>The web app authenticates interactive users with Microsoft Entra ID and keeps the browser session inside ASP.NET Core authentication.</span>
+                </section>
+            </div>
+        </header>
+
+        <article class="shell__content">
+            @Body
+        </article>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error interrupted the current request.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">x</span>
+</div>
+
+@code {
+    private static string GetDisplayName(ClaimsPrincipal user)
+    {
+        return user.Identity?.Name?.Trim() switch
+        {
+            { Length: > 0 } displayName => displayName,
+            _ => user.FindFirst("name")?.Value
+                ?? user.FindFirst(ClaimTypes.Name)?.Value
+                ?? "Signed-in user"
+        };
+    }
+}

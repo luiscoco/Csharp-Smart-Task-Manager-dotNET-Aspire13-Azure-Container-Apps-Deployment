@@ -1,0 +1,16 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.0.0">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartTaskManager.Web\SmartTaskManager.Web.csproj" />
+    <ProjectReference Include="..\SmartTaskManager.Api\SmartTaskManager.Api.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>60cb4c43-197a-46b2-b9b6-3d6c35df775f</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

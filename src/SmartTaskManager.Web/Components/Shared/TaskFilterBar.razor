@@ -1,0 +1,85 @@
+@using UiTaskStatus = SmartTaskManager.Web.Models.TaskStatus
+
+<div class="toolbar toolbar--filters">
+    <div class="toolbar__group">
+        <div class="field field--compact">
+            <label class="field__label" for="@StatusInputId">Status</label>
+            <InputSelect id="@StatusInputId" TValue="UiTaskStatus?" class="field__input" @bind-Value="Filter.Status" disabled="@Disabled">
+                <option value="">All statuses</option>
+                @foreach (UiTaskStatus status in Enum.GetValues<UiTaskStatus>())
+                {
+                    <option value="@status">@FormatStatus(status)</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="field field--compact">
+            <label class="field__label" for="@PriorityInputId">Priority</label>
+            <InputSelect id="@PriorityInputId" TValue="TaskPriority?" class="field__input" @bind-Value="Filter.Priority" disabled="@Disabled">
+                <option value="">All priorities</option>
+                @foreach (TaskPriority priority in Enum.GetValues<TaskPriority>())
+                {
+                    <option value="@priority">@priority</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+
+    <div class="toolbar__group toolbar__group--actions">
+        <button class="button button--ghost button--small" type="button" @onclick="ApplyAsync" disabled="@Disabled">
+            Apply filters
+        </button>
+        <button
+            class="button button--ghost button--small"
+            type="button"
+            @onclick="ResetAsync"
+            disabled="@(!Filter.HasActiveFilters || Disabled)">
+            Clear filters
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(HelpText))
+{
+    <p class="field__help">@HelpText</p>
+}
+
+@code {
+    private readonly string StatusInputId = $"status-filter-{Guid.NewGuid():N}";
+    private readonly string PriorityInputId = $"priority-filter-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired]
+    public TaskListViewFilter Filter { get; set; } = new();
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public string? HelpText { get; set; }
+
+    [Parameter]
+    public EventCallback OnApply { get; set; }
+
+    [Parameter]
+    public EventCallback OnReset { get; set; }
+
+    private Task ApplyAsync()
+    {
+        return OnApply.InvokeAsync();
+    }
+
+    private async Task ResetAsync()
+    {
+        Filter.Clear();
+        await OnReset.InvokeAsync();
+    }
+
+    private static string FormatStatus(UiTaskStatus status)
+    {
+        return status switch
+        {
+            UiTaskStatus.InProgress => "In Progress",
+            _ => status.ToString()
+        };
+    }
+}

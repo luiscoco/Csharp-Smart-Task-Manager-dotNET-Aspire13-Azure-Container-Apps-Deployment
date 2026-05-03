@@ -1,0 +1,1 @@
+using System; using System.Linq; class Program { static void Main() { foreach(var m in typeof(Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions).GetMethods().Where(m => m.Name == "AddSecurityRequirement")) { Console.WriteLine("AddSecurityRequirement(" + string.Join(", ", m.GetParameters().Select(p => p.Name + " : " + p.ParameterType.Name)) + ")"); } } }
