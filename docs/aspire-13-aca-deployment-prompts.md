@@ -305,6 +305,58 @@ Review generated artifacts for:
 Stop before any cloud operation and summarize the exact Azure commands that would be needed later.
 ```
 
+## Prompt 4 Local Artifact Review Results
+
+Local artifacts generated for review:
+
+- `src/SmartTaskManager.AppHost/artifacts/aca-review/manifest/aspire-manifest.json`
+- `src/SmartTaskManager.AppHost/artifacts/aca-review/manifest/aca-env.module.bicep`
+- `src/SmartTaskManager.AppHost/artifacts/aca-review/manifest/smarttaskmanager-api-containerapp.module.bicep`
+- `src/SmartTaskManager.AppHost/artifacts/aca-review/manifest/smarttaskmanager-web-containerapp.module.bicep`
+
+No Azure deployment command was run. `azd` was not available on this machine during review, so full `azd infra gen` output was not generated. The local Aspire manifest publisher did generate reviewable ACA Bicep modules.
+
+Generated resource review:
+
+- Azure Container Apps environment is generated in `aca-env.module.bicep`.
+- Azure Container Registry is generated with Basic SKU.
+- Log Analytics workspace is generated with `PerGB2018` billing.
+- User-assigned managed identity is generated for Container Apps image pull access.
+- `AcrPull` role assignment is generated from the managed identity to ACR.
+- Aspire Dashboard is generated as an ACA environment .NET component named `aspire-dashboard`.
+- `smarttaskmanager-web` has public ingress with `external: true`.
+- `smarttaskmanager-api` has internal ingress with `external: false`.
+- SQL connection string is a secure parameter and ACA secret reference for the API.
+- Web Entra client secret is a secure parameter and ACA secret reference for the web app.
+- Both container apps use `activeRevisionsMode: Single`.
+- Both container apps are set to `minReplicas: 1` and `maxReplicas: 1`.
+
+`SmartTaskManagerApi__BaseUrl` review:
+
+- The generated web app setting currently points to `https://smarttaskmanager-api.internal.<aca-default-domain>`.
+- The generated API ingress uses `transport: 'http'`.
+- Before deployment, confirm whether ACA internal HTTPS works as generated for this service-to-service call.
+- If validation or generated infra review shows the internal HTTPS URL is not reachable from the web container, change the AppHost setting to use the API HTTP endpoint instead.
+
+Blazor Server review:
+
+- The one-replica configuration is acceptable for the first ACA deployment because server-side Blazor circuits do not need cross-replica affinity.
+- Sticky sessions are not configured in the generated Bicep.
+- If `smarttaskmanager-web` is later scaled beyond one replica, configure session affinity before increasing `maxReplicas`.
+
+Configuration review:
+
+- The generated Bicep only externalizes the SQL connection string and web client secret because those were modeled as publish-time Aspire parameters.
+- Non-secret Entra settings remain available from checked-in appsettings files unless the AppHost is extended to emit them as ACA environment variables.
+- For stricter environment-driven production config, add explicit AppHost environment variables for the non-secret settings listed in Prompt 3.
+
+Review risks:
+
+- The generated Container Apps modules use preview API versions.
+- Aspire Dashboard adds a resource to review for cost, exposure, and operational need.
+- Log Analytics can become cost-impacting if verbose logs are retained or traffic increases.
+- `minReplicas: 1` avoids Blazor scale-out complexity but prevents scale-to-zero savings.
+
 ## Prompt 5: Actual Deployment Later
 
 ```text
@@ -348,19 +400,39 @@ Do not delete or change Azure resources unless I explicitly ask. If rollback is 
 
 These are examples of the kinds of commands a later deployment prompt may propose. Do not run them until the actual deployment task is approved.
 
+Local-only review command, if `azd` is installed:
+
 ```powershell
-azd init
+azd infra gen
+```
+
+Cloud deployment command flow after approval:
+
+```powershell
 azd auth login
+azd env new <azd-environment-name>
 azd up
+```
+
+Staged alternative after approval:
+
+```powershell
+azd auth login
+azd env new <azd-environment-name>
+azd provision
+azd deploy
 ```
 
 Expected high-level behavior:
 
-1. `azd init` creates local AZD project metadata, commonly including `azure.yaml`.
-2. `azd up` provisions Azure resources and deploys the containerized Aspire resources.
-3. Aspire/AZD generates an app model from the AppHost, builds container images, pushes them to Azure Container Registry, and updates Azure Container Apps to run those images.
-4. After the web FQDN is known, Microsoft Entra redirect URIs must be updated.
-5. After Entra is aligned, perform authenticated browser validation.
+1. `azd infra gen` generates local infrastructure artifacts for review only.
+2. `azd auth login` authenticates the developer CLI to Azure.
+3. `azd env new <azd-environment-name>` creates/selects isolated local AZD environment metadata.
+4. `azd up` provisions Azure resources and deploys the containerized Aspire resources.
+5. The staged alternative splits provisioning and deployment into `azd provision` and `azd deploy`.
+6. Aspire/AZD generates an app model from the AppHost, builds container images, pushes them to Azure Container Registry, and updates Azure Container Apps to run those images.
+7. After the web FQDN is known, Microsoft Entra redirect URIs must be updated.
+8. After Entra is aligned, perform authenticated browser validation.
 
 ## References
 
