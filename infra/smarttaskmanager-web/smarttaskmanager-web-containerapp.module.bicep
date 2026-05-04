@@ -9,14 +9,14 @@ param smarttaskmanager_web_containerimage string
 
 param smarttaskmanager_web_containerport string
 
-@secure()
-param webazureadclientsecret_value string
-
 param webazureadinstance_value string
 
 param webazureadtenantid_value string
 
 param webazureadclientid_value string
+
+@secure()
+param webazureadclientsecret_value string
 
 param webazureadcallbackpath_value string
 

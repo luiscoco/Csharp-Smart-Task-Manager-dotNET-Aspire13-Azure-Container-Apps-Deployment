@@ -21,7 +21,12 @@
           "aca_env_outputs_azure_container_registry_managed_identity_id": "{aca-env.outputs.AZURE_CONTAINER_REGISTRY_MANAGED_IDENTITY_ID}",
           "smarttaskmanager_api_containerimage": "{smarttaskmanager-api.containerImage}",
           "smarttaskmanager_api_containerport": "{smarttaskmanager-api.containerPort}",
-          "smarttaskmanagersqlconnectionstring_value": "{smartTaskManagerSqlConnectionString.value}"
+          "smarttaskmanagersqlconnectionstring_value": "{smartTaskManagerSqlConnectionString.value}",
+          "apiazureadinstance_value": "{apiAzureAdInstance.value}",
+          "apiazureadtenantid_value": "{apiAzureAdTenantId.value}",
+          "apiazureadclientid_value": "{apiAzureAdClientId.value}",
+          "apiazureadaudience_value": "{apiAzureAdAudience.value}",
+          "apiauthorizationrequiredscope_value": "{apiAuthorizationRequiredScope.value}"
         }
       },
       "env": {
@@ -30,7 +35,16 @@
         "OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY": "in_memory",
         "ASPNETCORE_FORWARDEDHEADERS_ENABLED": "true",
         "HTTP_PORTS": "{smarttaskmanager-api.bindings.http.targetPort}",
-        "ConnectionStrings__SmartTaskManager": "{smartTaskManagerSqlConnectionString.value}"
+        "ConnectionStrings__SmartTaskManager": "{smartTaskManagerSqlConnectionString.value}",
+        "AzureAd__Instance": "{apiAzureAdInstance.value}",
+        "AzureAd__TenantId": "{apiAzureAdTenantId.value}",
+        "AzureAd__ClientId": "{apiAzureAdClientId.value}",
+        "AzureAd__Audience": "{apiAzureAdAudience.value}",
+        "Authorization__RequiredScope": "{apiAuthorizationRequiredScope.value}",
+        "Database__EnableEfLogging": "false",
+        "Database__EnableDetailedErrors": "false",
+        "Database__EnableSensitiveDataLogging": "false",
+        "Seeding__EnableSampleData": "false"
       },
       "bindings": {
         "http": {
@@ -58,7 +72,14 @@
           "aca_env_outputs_azure_container_registry_managed_identity_id": "{aca-env.outputs.AZURE_CONTAINER_REGISTRY_MANAGED_IDENTITY_ID}",
           "smarttaskmanager_web_containerimage": "{smarttaskmanager-web.containerImage}",
           "smarttaskmanager_web_containerport": "{smarttaskmanager-web.containerPort}",
-          "webazureadclientsecret_value": "{webAzureAdClientSecret.value}"
+          "webazureadclientsecret_value": "{webAzureAdClientSecret.value}",
+          "webazureadinstance_value": "{webAzureAdInstance.value}",
+          "webazureadtenantid_value": "{webAzureAdTenantId.value}",
+          "webazureadclientid_value": "{webAzureAdClientId.value}",
+          "webazureadcallbackpath_value": "{webAzureAdCallbackPath.value}",
+          "webazureadsignedoutcallbackpath_value": "{webAzureAdSignedOutCallbackPath.value}",
+          "smarttaskmanagerapiaudience_value": "{smartTaskManagerApiAudience.value}",
+          "smarttaskmanagerapiscopes_value": "{smartTaskManagerApiScopes.value}"
         }
       },
       "env": {
@@ -72,7 +93,14 @@
         "SMARTTASKMANAGER-API_HTTPS": "{smarttaskmanager-api.bindings.https.url}",
         "services__smarttaskmanager-api__https__0": "{smarttaskmanager-api.bindings.https.url}",
         "SmartTaskManagerApi__BaseUrl": "{smarttaskmanager-api.bindings.https.url}",
-        "AzureAd__ClientSecret": "{webAzureAdClientSecret.value}"
+        "AzureAd__Instance": "{webAzureAdInstance.value}",
+        "AzureAd__TenantId": "{webAzureAdTenantId.value}",
+        "AzureAd__ClientId": "{webAzureAdClientId.value}",
+        "AzureAd__ClientSecret": "{webAzureAdClientSecret.value}",
+        "AzureAd__CallbackPath": "{webAzureAdCallbackPath.value}",
+        "AzureAd__SignedOutCallbackPath": "{webAzureAdSignedOutCallbackPath.value}",
+        "SmartTaskManagerApi__Audience": "{smartTaskManagerApiAudience.value}",
+        "SmartTaskManagerApi__Scopes": "{smartTaskManagerApiScopes.value}"
       },
       "bindings": {
         "http": {
@@ -106,6 +134,114 @@
         "value": {
           "type": "string",
           "secret": true
+        }
+      }
+    },
+    "webAzureAdInstance": {
+      "type": "parameter.v0",
+      "value": "{webAzureAdInstance.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "webAzureAdTenantId": {
+      "type": "parameter.v0",
+      "value": "{webAzureAdTenantId.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "webAzureAdClientId": {
+      "type": "parameter.v0",
+      "value": "{webAzureAdClientId.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "webAzureAdCallbackPath": {
+      "type": "parameter.v0",
+      "value": "{webAzureAdCallbackPath.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "webAzureAdSignedOutCallbackPath": {
+      "type": "parameter.v0",
+      "value": "{webAzureAdSignedOutCallbackPath.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "smartTaskManagerApiAudience": {
+      "type": "parameter.v0",
+      "value": "{smartTaskManagerApiAudience.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "smartTaskManagerApiScopes": {
+      "type": "parameter.v0",
+      "value": "{smartTaskManagerApiScopes.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "apiAzureAdInstance": {
+      "type": "parameter.v0",
+      "value": "{apiAzureAdInstance.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "apiAzureAdTenantId": {
+      "type": "parameter.v0",
+      "value": "{apiAzureAdTenantId.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "apiAzureAdClientId": {
+      "type": "parameter.v0",
+      "value": "{apiAzureAdClientId.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "apiAzureAdAudience": {
+      "type": "parameter.v0",
+      "value": "{apiAzureAdAudience.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "apiAuthorizationRequiredScope": {
+      "type": "parameter.v0",
+      "value": "{apiAuthorizationRequiredScope.inputs.value}",
+      "inputs": {
+        "value": {
+          "type": "string"
         }
       }
     }

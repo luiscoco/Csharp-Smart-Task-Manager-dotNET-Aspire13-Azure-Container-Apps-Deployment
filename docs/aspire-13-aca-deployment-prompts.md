@@ -434,6 +434,43 @@ Expected high-level behavior:
 7. After the web FQDN is known, Microsoft Entra redirect URIs must be updated.
 8. After Entra is aligned, perform authenticated browser validation.
 
+## First ACA Deployment Lessons
+
+The first successful ACA deployment exposed a few process changes that should be included in future prompts.
+
+Preflight should happen before deployment approval:
+
+- Check `azd version`.
+- Check `az version`.
+- Check `az account show`.
+- Confirm `.azure/` is ignored by git.
+- Run `dotnet build` or document the local blocker.
+- Run `azd infra generate` or `azd infra synth`, depending on the installed azd version.
+- Review `infra/main.parameters.json` and the generated `AZURE_*` parameter names before `azd provision` or `azd deploy`.
+
+Secret handling should avoid chat and source control:
+
+- Do not paste real SQL passwords, SQL connection strings, or Entra client secrets into chat.
+- Prefer local environment variables:
+  - `SMARTTASKMANAGER_SQL_CONNECTION_STRING`
+  - `SMARTTASKMANAGER_WEB_CLIENT_SECRET`
+- Verify only presence and length, never the value.
+- Treat any secret pasted into chat as exposed and rotate it.
+
+Deployment prompts should explicitly include a fallback for secure-parameter binding issues:
+
+- `azd provision` can succeed while `azd deploy` fails with `ContainerAppSecretInvalid`.
+- This can happen when generated per-service Container App deployments receive blank secure parameter values.
+- If this happens, do not keep retrying the same `azd deploy` command.
+- Use `azd deploy <service>` only to build and push the image if needed.
+- Then deploy the generated `infra/smarttaskmanager-api/*containerapp.module.bicep` and `infra/smarttaskmanager-web/*containerapp.module.bicep` modules directly with `az deployment group create`.
+- Pass secret values as secure Bicep parameters from local environment variables.
+- Verify that ACA stores them as secret refs:
+  - `connectionstrings--smarttaskmanager`
+  - `azuread--clientsecret`
+
+The actual deployed shape and fallback details are documented in [azure-container-apps-deployment-notes.md](azure-container-apps-deployment-notes.md).
+
 ## References
 
 - [Deploy an Aspire project to Azure Container Apps using Azure Developer CLI](https://learn.microsoft.com/en-us/dotnet/aspire/deployment/azure/aca-deployment-azd-in-depth)

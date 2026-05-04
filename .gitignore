@@ -12,5 +12,6 @@
 *.suo
 
 # Local secrets and machine-specific overrides
+.azure/
 **/appsettings.Local.json
 **/secrets.json

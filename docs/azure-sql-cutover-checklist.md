@@ -2,151 +2,227 @@
 
 ## Purpose
 
-This checklist is the execution sequence for moving the current local SQL Server database to Azure SQL Database with an offline cutover.
+This checklist is the future offline cutover sequence for moving the local `SmartTaskManagerDb` SQL Server database to Azure SQL Database.
+
+Do not execute it until the Azure SQL target, migration window, and rollback plan are approved.
 
 ## 1. Verify Source Database
 
-- Confirm the source instance is still the expected runtime target:
-  `localhost`
-- Confirm the source database is still:
-  `SmartTaskManagerDb`
-- Confirm the source connection string still matches or intentionally overrides:
-  `Server=localhost;Database=SmartTaskManagerDb;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True`
-- Confirm the app is not pointing at a different local or remote SQL instance through environment overrides.
-- Confirm the core tables exist:
-  `Users`, `Tasks`, `TaskHistoryEntries`
-- Confirm `__EFMigrationsHistory` exists and contains the current migration set if the local database was created through EF Core migrations.
+- Confirm the API still uses `ConnectionStrings:SmartTaskManager`.
+- Confirm the source database is still `SmartTaskManagerDb`.
+- Confirm the intended source connection string is still:
 
-## 2. Provision The Target Azure SQL Environment
+```text
+Server=localhost;Database=SmartTaskManagerDb;Integrated Security=True;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True
+```
 
-- Create the Azure resource group.
-- Create the Azure SQL logical server.
-- Add firewall rule for the current client IP.
-- Add firewall rule for Azure services if App Service will connect later.
-- Create one Azure SQL Database:
-  - free offer if supported
-  - otherwise the paid serverless fallback
-
-Important:
-
-- the target database must remain new or empty before import
-- do not let the API start against the target before the import step
-
-## 3. Freeze Writes
-
-- Stop the local API if it is running.
-- Stop the local web app if it is running.
-- Close tools or scripts that may change task or user data.
-- Treat the migration as offline for the duration of export and import.
-
-## 4. Export The Local Database
-
-- Create the `.bacpac` under:
-  `C:\tmp\SmartTaskManagerDb.bacpac`
-- Run `SqlPackage /Action:Export`
-- Verify the export finishes successfully.
-- Do not continue if export errors indicate unsupported objects or data issues.
-
-## 5. Import Into Azure SQL Database
-
-- Confirm again that the Azure target database is empty.
-- Run `SqlPackage /Action:Import`
-- Wait for import to complete.
-- Do not allow the application to initialize the database during the import window.
-
-## 6. Validate Schema, Data, And Migration History
-
-- Check that the target contains:
+- Check for environment variables, user secrets, launch settings, or hosting overrides that point the API at a different database.
+- Confirm the source database is reachable from this laptop.
+- Confirm the source database contains expected tables:
   - `Users`
   - `Tasks`
   - `TaskHistoryEntries`
   - `__EFMigrationsHistory`
-- Compare row counts between source and target for:
+- Record source row counts for critical tables.
+- Record the source database size.
+- Stop if the database is too large for the chosen SKU or if unexpected database objects need assessment.
+
+## 2. Provision Target
+
+- Create one resource group.
+- Create one Azure SQL logical server.
+- Add a firewall rule for the current client public IP.
+- Add `0.0.0.0` Azure services access only if the future Azure-hosted API needs it.
+- Create one single Azure SQL Database:
+  - preferred: Azure SQL Database free offer, General Purpose serverless, free limit enabled, `AutoPause`
+  - paid fallback: Basic, only if source database is under `2 GB`
+  - next fallback: S0 if source is over `2 GB` or Basic import is too slow
+- Confirm the target database is empty before import.
+- Do not start the API against the target before import.
+
+## 3. Freeze Writes
+
+- Stop the local API.
+- Stop the local web app.
+- Close admin tools, scripts, or background jobs that can change users or tasks.
+- Announce the offline migration window if anyone else can use the app.
+- Keep writes frozen until export, import, and validation are complete.
+
+## 4. Export Local Database
+
+- Use `SqlPackage /Action:Export`.
+- Write the BACPAC to:
+
+```text
+C:\tmp\SmartTaskManagerDb.bacpac
+```
+
+- Keep `VerifyExtraction=True`.
+- Stop if `SqlPackage` reports unsupported objects, consistency errors, or extraction failures.
+
+## 5. Import Into Azure SQL Database
+
+- Confirm the Azure SQL Database is still empty.
+- Use `SqlPackage /Action:Import`.
+- Import into the Azure SQL Database connection string with:
+  - `Encrypt=True`
+  - `TrustServerCertificate=False`
+  - `MultipleActiveResultSets=False`
+- Do not allow app startup migrations to run during the import window.
+
+## 6. Validate Migration
+
+- Confirm target tables exist:
   - `Users`
   - `Tasks`
   - `TaskHistoryEntries`
-- Spot-check a few representative rows:
+  - `__EFMigrationsHistory`
+- Compare source and target row counts for:
+  - `Users`
+  - `Tasks`
+  - `TaskHistoryEntries`
+- Compare EF migration history rows.
+- Spot-check representative records:
   - one user
-  - one task
+  - several tasks across statuses and priorities
   - one task history chain
-- Confirm foreign-key relationships look correct.
+- Confirm foreign-key relationships are intact.
+- Confirm the Azure SQL service objective is the intended free, Basic, or fallback SKU.
 
-## 7. Prepare The Application Cutover
+## 7. Switch API Configuration
 
-- Build the final Azure SQL connection string:
-  `Server=tcp:<sql-server-name>.database.windows.net,1433;Initial Catalog=<database-name>;Persist Security Info=False;User ID=<sql-admin-user>;Password=<sql-admin-password>;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;`
-- Set the API runtime app setting later as:
-  `ConnectionStrings__SmartTaskManager`
-- Do not put this value into tracked source files.
+- Build the Azure SQL connection string in this format:
 
-## 8. Smoke Test The API
+```text
+Server=tcp:<sql-server-name>.database.windows.net,1433;Initial Catalog=<database-name>;Persist Security Info=False;User ID=<sql-admin-user>;Password=<sql-admin-password>;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
+```
 
-- Start the API against the Azure SQL connection string.
+- Set it as runtime configuration, not in source control:
+
+```text
+ConnectionStrings__SmartTaskManager
+```
+
+- Ensure production sample seeding remains disabled:
+
+```text
+Seeding__EnableSampleData=false
+```
+
+## 8. Smoke Test API
+
+- Start or deploy the API with the Azure SQL connection string.
 - Confirm startup succeeds.
-- Confirm startup migration does not fail.
-- Confirm the API can:
+- Confirm EF startup migration does not attempt to recreate imported schema.
+- Confirm API operations work:
   - list users
+  - create a low-risk test user if appropriate
   - list tasks
   - load task history
-- Confirm no accidental reseeding occurs in production configuration.
+  - create, update, complete, and archive a low-risk test task if appropriate
+- Review API logs for SQL connectivity or migration errors.
 
-## 9. Smoke Test The Full Application
+## 9. Smoke Test Web App
 
 - Start or deploy the web app pointing at the API.
-- Sign in.
-- Load dashboard and task screens.
-- Create a low-risk test record.
-- Confirm the new record appears in Azure SQL.
+- Sign in through Microsoft Entra ID.
+- Load dashboard, users, tasks, and task details pages.
+- Confirm writes flow through the API to Azure SQL.
+- Confirm no web project setting directly references SQL Server.
 
-## 10. Rollback Plan
+## 10. Rollback
 
-If validation fails:
+If validation or smoke tests fail:
 
-- stop the API/web app from using Azure SQL
-- switch the API connection string back to the local or previous database
+- stop the API and web app from using Azure SQL
+- switch the API connection string back to the previous local or known-good database
 - keep the original local `SmartTaskManagerDb` unchanged
-- fix the export/import issue
-- reprovision a fresh empty Azure SQL Database if necessary
-- rerun the migration
+- keep the failed BACPAC and import logs for diagnosis
+- delete and recreate the Azure SQL Database if a fresh empty target is needed
+- rerun export/import only after the root cause is fixed
 
-## 11. Post-Cutover Hardening
+Rollback is straightforward only if the local database remains unchanged and writes stay frozen until cutover is accepted.
 
-- keep only the firewall rules you still need
-- verify no secret or password was written to source control
-- consider replacing SQL authentication with a stronger production access model later
+## 11. Post-Cutover
 
-## Final Reminder
+- Remove any temporary firewall rule that is no longer needed.
+- Decide whether `AllowAzureServices` should remain enabled or be replaced with stricter networking.
+- Store SQL secrets only in the approved runtime secret store or app configuration.
+- Delete local BACPAC files only after validation and backup requirements are satisfied.
+- Monitor Azure SQL free-offer consumption or Basic storage usage.
+- Consider replacing SQL authentication with Microsoft Entra authentication or managed identity later.
 
-- Do not rely on EF Core startup migration as the primary data migration strategy.
-- Use BACPAC export/import as the primary data move.
-- Keep the local database intact until Azure validation is complete.
+## Completed Cutover Snapshot
 
-## Execution Snapshot
+Execution date: `2026-05-04`
 
 Completed Azure-side steps:
 
-- resource group created:
-  `rg-smarttaskmanager-data-dev-weu`
-- logical server created:
-  `sql-stm-dev-weu-01`
-- database created:
-  `SmartTaskManagerDb`
-- `.bacpac` imported successfully from:
-  `C:\tmp\SmartTaskManagerDb.bacpac`
+- created resource group `rg-smarttaskmanager-data-dev-weu`
+- created Azure SQL logical server `sql-stm-dev-weu-01`
+- created firewall rule `AllowCurrentClientIp` for `81.33.174.79`
+- created firewall rule `AllowAzureServices` for `0.0.0.0`
+- attempted the Azure SQL free offer first
+- used Basic paid fallback after Azure returned free-offer `InternalServerError`
+- created Azure SQL Database `SmartTaskManagerDb`
+- confirmed the target database had `0` user-defined objects before import
+- imported `C:\tmp\SmartTaskManagerDb.bacpac` successfully with `SqlPackage`
 
-Validated target contents:
+Final Azure SQL target:
+
+- server: `sql-stm-dev-weu-01.database.windows.net`
+- database: `SmartTaskManagerDb`
+- edition: `Basic`
+- service objective: `Basic`
+- free offer used: no
+
+Validation results:
 
 - tables present:
-  `Users`, `Tasks`, `TaskHistoryEntries`, `__EFMigrationsHistory`
+  - `__EFMigrationsHistory`
+  - `TaskHistoryEntries`
+  - `Tasks`
+  - `Users`
 - row counts:
   - `Users`: `3`
   - `Tasks`: `9`
   - `TaskHistoryEntries`: `13`
-  - `__EFMigrationsHistory`: `1`
+- EF migration history:
+  - `20260408141007_InitialSqlServer` / `10.0.0`
+- representative users:
+  - `Alice`
+  - `Bob`
+  - `Carla`
+- representative tasks:
+  - `Archive old travel plan`
+  - `Renew gym membership`
+  - `Finish API tutorial`
+  - `Prepare sprint review`
+  - `Complete LINQ exercises`
+- task rows with missing user reference: `0`
 
-Validated sample data:
+API app setting key for later:
 
-- users include:
-  `Alice`, `Bob`, `Carla`
-- sample task titles include:
-  `Archive old travel plan`, `Buy groceries`, `Complete LINQ exercises`
+```text
+ConnectionStrings__SmartTaskManager
+```
+
+Final redacted API connection string:
+
+```text
+Data Source=tcp:sql-stm-dev-weu-01.database.windows.net,1433;Initial Catalog=SmartTaskManagerDb;Persist Security Info=False;User ID=stmsqladmin;Password=<redacted>;MultipleActiveResultSets=False;Connect Timeout=30;Encrypt=True;TrustServerCertificate=False
+```
+
+Remaining manual steps:
+
+- Store or reset the SQL admin password in the approved secret store before configuring the API.
+- Set `ConnectionStrings__SmartTaskManager` on the API runtime when ready for application cutover.
+- Keep `Seeding__EnableSampleData=false` for production-like runtime settings.
+- Decide whether to keep `AllowAzureServices` or replace it with stricter App Service outbound IP rules, private networking, or managed identity later.
+
+## Final Reminders
+
+- The primary data migration path is BACPAC export/import.
+- EF Core startup migration is useful for normal schema evolution, but it is not a data migration mechanism.
+- The target Azure SQL Database must be new or empty before import.
+- Do not commit secrets or BACPAC files.

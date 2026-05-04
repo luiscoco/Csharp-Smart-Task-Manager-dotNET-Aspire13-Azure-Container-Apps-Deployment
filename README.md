@@ -10,6 +10,7 @@ Security status:
 - `SmartTaskManager.Api` now validates Microsoft Entra JWT bearer tokens
 - `SmartTaskManager.Web` now acquires delegated access tokens server-side and forwards them to `SmartTaskManager.Api`
 - the Entra setup assumptions are documented in [docs/entra-security-configuration.md](docs/entra-security-configuration.md)
+- Azure Container Apps deployment notes are documented in [docs/azure-container-apps-deployment-notes.md](docs/azure-container-apps-deployment-notes.md)
 
 ## Solution Overview
 
